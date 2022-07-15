@@ -1,0 +1,263 @@
+<html>
+    <head>
+        <!--settings-->
+        <script>
+            var id = 219;
+            var promo = "promo";
+        </script>
+        <script>
+            var game;
+            var isStarted;
+        </script>
+        <!--autorization-->
+        <script>
+            var token = null;
+            //
+            let auth = async ()=>{
+                let email = document.getElementById("email_auth_input").value
+                let password = document.getElementById("password_auth_input").value;
+
+                let response = await fetch('https://auth.justdoluck.ru/api/sign-in', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        email: email,
+                        password: password
+                    }),
+                    headers: {
+                        'Content-Type': 'application/json',
+                        accept: 'application/json',
+                        'Api-Token': 'justdoluck_api'
+                    }
+                });
+                let json = await response.json();
+                console.log(json)
+                try{
+                    token = json.payload.token;
+                    document.getElementById("auth_wrapper").innerHTML = "My token:" + token;
+                    document.getElementById("vote_btns").style = ""
+                    connectToGameSocket();
+                } catch (e){
+                    console.log(e)
+                }
+
+            }
+        </script>
+        <!--utils-->
+        <script>
+            //utils
+            let getQueryParams = () => {
+                let search = window.location.search;
+                let params = {};
+                let key_value_array = search.substring(1).split('&');
+                key_value_array.map((value, index, array) => {
+                    let key = value.split('=')[0];
+                    let val = value.split('=')[1];
+                    params[key] = val;
+                });
+                return params;
+            };
+        </script>
+        <!--time management-->
+        <script>
+            //time management
+
+            let getCurrentTime = async () => {
+                if (window.currentTime) {
+                    return window.currentTime;
+                } else {
+                    let response = await fetch('https://alg.justdoluck.ru/api/get-UTC-time');
+                    let json = await response.json();
+                    window.currentTime = json.time;
+                    timeShift = new Date(json.time).getTime() - new Date().getTime();
+                    setInterval(() => {
+                        window.currentTime = new Date(new Date().getTime() + timeShift).toISOString();
+                    }, 1000);
+                    return json.time;
+                }
+            };
+
+            let setTime = async ()=>{
+
+                let currentSeconds = 59 - new Date(await getCurrentTime()).getSeconds()
+                document.getElementById("coin_timer").innerText=currentSeconds
+
+                let serv = new Date( new Date((await getCurrentTime())).getTime())
+                console.log()
+                isStarted = ((serv - (new Date(game?.game?.date || 0).getTime())+60000)/1000/60)>1
+
+                if (currentSeconds<30 && isStarted){
+                    document.getElementById( "vote_for_tail").disabled  = true
+                    document.getElementById( "vote_for_head").disabled  = true
+                }
+                else {
+                    document.getElementById( "vote_for_tail").disabled  = false
+                    document.getElementById( "vote_for_head").disabled  = false
+
+                }
+                setTimeout(()=>{
+                    setTime();
+                }, 1000)
+            }
+            setTime();
+        </script>
+        <!--timeline socket-->
+        <script>
+
+          let connectToTimeline = ()=>{
+              //Подключение к сокету
+              var socket = new WebSocket("wss://alg.justdoluck.ru/round");
+              socket.onopen = function() {
+                  console.log("Соединение установлено.");
+              };
+
+              socket.onclose = function(event) {
+                  if (event.wasClean) {
+                      alert('Соединение закрыто чисто');
+                  } else {
+                      alert('Обрыв соединения'); // например, "убит" процесс сервера
+                  }
+                  alert('Код: ' + event.code + ' причина: ' + event.reason);
+              };
+
+              socket.onmessage = function(event) {
+                  document.getElementById("last_coin").innerText=JSON.parse(event.data).answer?"Решка":"Орел";
+                  document.getElementById("accept_vote_indication").innerText=""
+                  console.log(myLastVote)
+              };
+
+              socket.onerror = function(error) {
+                  alert("Ошибка " + error.message);
+              };
+          }
+        </script>
+        <!--last coin timeine-->
+        <script>
+            //get timeline
+            (async ()=>{
+                let response = await fetch('https://alg.justdoluck.ru/api/rounds/today?page=1&count=100', {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        accept: 'application/json',
+                        'Api-Token': 'justdoluck_api'
+                    }
+                });
+                let json = await response.json();
+                document.getElementById("last_coin").innerText=json.data.rounds[0].answer?"Решка":"Орел"
+            })()
+        </script>
+        <!--game info-->
+        <script>
+            //game info
+            (async ()=>{
+                let request = `https://core.justdoluck.ru/api/player/games/details/${id}`;
+                let headers = { 'Content-Type': 'application/json', accept: 'application/json', 'Api-Token': 'justdoluck_api' };
+                const response = await fetch(request, {
+                    method: 'GET',
+                    headers: headers
+                });
+                let json = await response.json();
+                game = json.data
+                document.getElementById("game_info").innerText = JSON.stringify(json.data);
+                connectToTimeline();
+            })()
+        </script>
+        <!--game result  socket-->
+        <script>
+            let connectToGameSocket = ()=>{
+                //
+                let socketGame = new WebSocket(`wss://round2-k8s-wss.justdoluck.ru/?game_id=${id}&bearer_token=${token}`);
+                socketGame.onopen = function() {
+                    console.log("Соединение установлено.");
+                };
+
+                socketGame.onclose = function(event) {
+                    if (event.wasClean) {
+                        console.log('Соединение закрыто чисто');
+                    } else {
+                        console.log('Обрыв соединения'); // например, "убит" процесс сервера
+                    }
+                    console.log('Код: ' + event.code + ' причина: ' + event.reason);
+                };
+
+                socketGame.onmessage = function(event) {
+                    console.log(event)
+                    document.getElementById("game_socket_info").innerText=event.data;
+                    let eventType = JSON.parse(event.data).event
+                    if (eventType==="RoundResult"){
+                        let result = JSON.parse(event.data).result;
+                        if (myLastVote!==null){
+                            if (myLastVote===result){
+                                alert("You guessed")
+                            }
+                            else {
+                                socketGame.close()
+                                alert("you lose")
+                            }
+                        }
+                    };
+                    if (eventType === "ParticipantsLeft"){
+                        if (JSON.parse(event.data).participantsLeft===1)
+                            alert("!!!YOU WIN!!!")
+                    }
+
+                };
+
+                socketGame.onerror = function(error) {
+                    alert("Ошибка " + error.message);
+                };
+            }
+        </script>
+        <!-- vote -->
+        <script>
+
+            var myLastVote = null;
+            let vote = async (vote)=>{
+                myLastVote = vote;
+                let url = 'https://round2-k8s.justdoluck.ru/api/games/' + id + '/vote/' + vote;
+                let responce = await fetch(url, {
+                    headers: {
+                        'Content-Type': 'application/json',
+                        accept: 'application/json',
+                        'Api-Token': 'justdoluck_api',
+                        Authorization: 'bearer ' + token
+                    },
+                    method: 'POST',
+                    body: JSON.stringify({sex: "male", promocode: promo})
+                });
+                document.getElementById("accept_vote_indication").innerText="You vote was accepted"
+                console.log(responce)
+            }
+        </script>
+    </head>
+    <body>
+        Styleless widget demo
+        <hr/>
+        <div id = "last_coin_crapper">
+            <span>Last coin: </span> <span id="last_coin"/>
+        </div>
+        <hr/>
+        <div id = "time_to_next_coin">
+            <span>Time to next coin(sec): </span> <span id="coin_timer"/>
+        </div>
+        <hr/>
+        <div id="auth_wrapper">
+            <div>Authorize to play</div>
+            <input id="email_auth_input">
+            <input id="password_auth_input">
+            <button type="button" onclick="auth()">Auth</button>
+        </div>
+        <hr/>
+        <div id="vote_btns" style="display: none">
+            <button id="vote_for_head" onclick="vote(1)">Vote for tail</button>
+            <button  id="vote_for_tail" onclick="vote(0)">Vote to head</button>
+            <span id="accept_vote_indication"></span>
+        </div>
+        <hr/>
+        <div id="game_info">
+
+        </div>
+        <hr/>
+        <div id="game_socket_info"/>
+    </body>
+</html>
